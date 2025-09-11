@@ -60,3 +60,5 @@ class Record(db.Model):
     student_type = db.Column(db.Enum('full-time', 'working', 'other'))
     last_school_attended = db.Column(db.String(255))
     school_type = db.Column(db.Enum('public', 'private', 'other'))
+    prediction_result = db.Column(db.Float)  # Changed to Float to store percentage
+    confidence = db.Column(db.Float)  # New field for confidence score

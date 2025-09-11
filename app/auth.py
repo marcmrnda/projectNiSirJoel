@@ -14,11 +14,67 @@ import smtplib
 import os
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import joblib
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+import xgboost as xgb
+
+auth = Blueprint('auth',__name__)
+
+
+CORS(auth, resources={r"/*": {"origins": "*"}})
 
 load_dotenv()  
 # Load credentials from environment
 email_user = os.getenv("EMAIL_USER")
-email_password = os.getenv("EMAIL_PASSWORD")
+email_password = os.getenv("EMAIL_PASSWORD") 
+
+# --- Load Models Once at Startup ---
+print("Loading models and training columns...")
+try:
+    meta_model = joblib.load('C:/dev/projects/sirJoelProject/app/AIMODEL/meta_model.pkl')
+    model1 = joblib.load('C:/dev/projects/sirJoelProject/app/AIMODEL/base_model1.pkl')
+    model2 = joblib.load('C:/dev/projects/sirJoelProject/app/AIMODEL/base_model2.pkl') 
+    model3 = joblib.load('C:/dev/projects/sirJoelProject/app/AIMODEL/base_model3.pkl')
+    training_columns = joblib.load('C:/dev/projects/sirJoelProject/app/AIMODEL/training_columns.pkl')
+    MODELS_LOADED = True
+    print("✓ All models loaded successfully!")
+except FileNotFoundError:
+    print("❌ Model files not found. Please train and save them first.")
+    MODELS_LOADED = False
+
+# --- Helper Function for Prediction ---
+def predict_student_stacked(student_dict):
+    """Predicts enrollment for a single student."""
+    if not MODELS_LOADED:
+        raise RuntimeError("Models are not loaded.")
+
+    try:
+        df = pd.DataFrame([student_dict])
+        df_encoded = pd.get_dummies(df)
+        df_encoded = df_encoded.reindex(columns=training_columns, fill_value=0)
+        
+        base_pred1 = model1.predict_proba(df_encoded)[:, 1]
+        base_pred2 = model2.predict_proba(df_encoded)[:, 1]
+        base_pred3 = model3.predict_proba(df_encoded)[:, 1]
+        
+        prediction_stack = np.column_stack([base_pred1, base_pred2, base_pred3])
+        
+        final_prediction = meta_model.predict(prediction_stack)[0]
+        final_probabilities = meta_model.predict_proba(prediction_stack)[0]
+        
+        prediction_percentage = final_probabilities * 100
+        confidence = max(final_probabilities)
+        
+        return {
+            "prediction_result": prediction_percentage,
+            "confidence": float(confidence)
+        }
+    except Exception as e:
+        raise RuntimeError(f"Error during prediction: {str(e)}")
+
 
 def send_welcome_email(emailAddress, password):
     # Create the email
@@ -63,10 +119,6 @@ def generate_crypto_token(length=8):
 
 
 
-auth = Blueprint('auth',__name__)
-
-
-CORS(auth, resources={r"/*": {"origins": "*"}})
 
 
 @auth.route('/register', methods=["POST","GET"])
@@ -111,6 +163,19 @@ def register():
             last_school_attended = request.form.get('last_school_attended')
             school_type = request.form.get('school_type')
             
+            student_dict = {    
+                "Program (First Choice)": course_1st.lower(),
+                "Program (Second Choice)": course_2nd.lower(),
+                "Current Region": curr_region.lower(),
+                "Current Province": curr_province.lower(),
+                "City/Municipality": curr_city.lower(),
+                "Permanent Country": per_country.lower(),
+                "Student Type": student_type.lower(),
+                "Last School Attended": last_school_attended.lower(),
+                "School Type": school_type.lower()
+            }
+            
+            results = predict_student_stacked(student_dict)
             
             
             birth_date = datetime.strptime(dateOfBirth, "%m/%d/%Y").date()
@@ -136,7 +201,7 @@ def register():
                                          gender=gender, citizen_of=citizen_of,
                                          curr_region=curr_region, curr_province=curr_province, curr_city=curr_city, curr_brgy=curr_brgy, curr_street=curr_street, curr_postal=curr_postal,
                                          per_country=per_country, per_region=per_region, per_province=per_province, per_city=per_city, per_brgy=per_brgy, per_street=per_street, per_postal=per_postal,
-                                         religion=religion, civil_status=civil_status, student_type=student_type, last_school_attended=last_school_attended, school_type=school_type
+                                         religion=religion, civil_status=civil_status, student_type=student_type, last_school_attended=last_school_attended, school_type=school_type,prediction_result=results['prediction_result'][1], confidence=results['confidence']
                 )
                     db.session.add(new_record)
                     db.session.commit()

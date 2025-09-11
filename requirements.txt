@@ -5,3 +5,9 @@ python-dotenv
 bcrypt
 flask_cors
 flask_wtf
+pandas
+joblib
+numpy
+scikit-learn
+xgboost
+smtplib
